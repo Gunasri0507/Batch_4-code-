@@ -1,0 +1,244 @@
+from flask import Flask, render_template, request, session, redirect, url_for, flash
+import sqlite3
+import os
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import load_model
+import sqlite3
+import numpy as np 
+import pandas as pd
+
+app = Flask(__name__)
+app.secret_key = 'jndjsahdjxasudhas-09vzx2223'
+model_path = "cnn_model.h5"  
+#cnn_model = load_model(model_path)
+
+class_names = {
+    0: 'KPIT Technologies', 1: 'Wipro Technologies', 2: 'Birlasoft',
+    3: 'Cognizant', 4: 'Tech Mahindra', 5: 'Infosys',
+    6: 'Hexaware Technologies', 7: 'css corp', 8: 'L&T Infotech'
+}
+
+def suggest_roles(skills):
+    skill_mapping = {
+        'python': 'Python Developer ,Machine Learning Engineer,Game Developer',
+        'sql': 'SQL Developer,Database Administrator (DBA),Database Developer,Business Intelligence (BI) Developer',
+        'javascript': 'JavaScript Developer,Mobile App Developer,Game Developer ',
+        'php': 'PHP Developer,System Administrator,Web Designer',
+        'java': 'Java Developer,Java Software Architect,Android Developer',
+        'ruby': 'Ruby Developer,Test Automation Engineer,Technical Support Engineer',
+        'html and css': 'FrontEnd Developer,Digital Marketing Specialist,Content Manager',
+        'mobile applications developer': 'Mobile Applications Developer, Mobile Applications Developer,Mobile Applications Developer',
+         'web developer': 'Web Developer, Web Developer, Web Developer',
+         'network security engineer': 'Network Security Engineer, Network Security Engineer, Network Security Engineer',
+        'technical support engineer': 'Technical Support Engineer, Technical Support Engineer, Technical Support Engineer',
+         'ui/ux developer': 'UI/UX Developer, UI/UX Developer, UI/UX Developer',
+        'software tester/Quality Assurance Engineer': 'Software Tester/Quality Assurance Engineer, Software Tester/Quality Assurance Engineer, Software Tester/Quality Assurance Engineer',
+         'database developer': 'Database Developer, Database Developer,Database Developer',
+         'mobile applications Developer' : 'Mobile Applications Developer, Mobile Applications Developer, Mobile Applications Developer',
+         'software engineer' : 'Software Engineer, Software Engineer, Software Engineer'
+
+    }
+    suggested_roles = [skill_mapping.get(skill, 'Unknown Role') for skill in skills.split(',')]
+    return ', '.join(suggested_roles)
+
+
+database = "new.db"
+conn = sqlite3.connect(database)
+cursor = conn.cursor()
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS register (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_name TEXT, user_email TEXT, password TEXT
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT, feedback TEXT
+    )
+''')
+conn.commit()
+print("table created")
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/admin', methods=["GET", "POST"])
+def admin():
+        return render_template('admin.html')
+
+
+    
+@app.route('/register', methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        user_name = request.form['user_name']   
+        user_email = request.form['user_email']
+        password = request.form['password']
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO register (user_name, user_email, password) VALUES (?, ?, ?)",
+                       (user_name, user_email, password))
+        conn.commit()
+        flash('Registration successful!', 'success')
+        return render_template('register.html')
+
+    return render_template('register.html')
+
+u=[]
+name=[]
+email=[]
+@app.route('/login', methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        user_email = request.form['user_email']
+        password = request.form['password']
+        cursor.execute("SELECT * FROM register WHERE user_email=? AND password=?", (user_email, password))
+        user = cursor.fetchone()
+        if user:
+            u.append(user_email)
+            name.append(user[1])
+            email.append(user[2])
+            return render_template('form.html',name=user[1],email=user[2])
+        else:
+            return "password mismatch"
+    return render_template('register.html')
+
+@app.route('/admin_login', methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        username = request.form['username']
+        password = request.form['password']
+        if username=="admin" and password=="admin":
+            return render_template("admin1.html")
+        else:
+            return "password mismatch"
+
+@app.route('/form1', methods=["GET", "POST"])
+def form1():
+    return render_template('form.html',name=name[-1],email=email[-1])
+
+
+def model():
+    train_data=pd.read_csv("Book2.csv", encoding='latin-1')
+    from sklearn.preprocessing import LabelEncoder
+    le_Skill = LabelEncoder()
+    le_depart= LabelEncoder()
+    train_data['skill'] = le_Skill.fit_transform(train_data['Skills Known'])
+    train_data['dept'] = le_depart.fit_transform(train_data['department'])
+    train_data = train_data.drop(['Skills Known','Certifications/Internships','Projects Done'],axis='columns')
+    from sklearn.model_selection import train_test_split
+    le_Company  = LabelEncoder()
+    train_data['target'] = le_Company.fit_transform(train_data['Company Placed'])
+    x = train_data.drop(['Full Name', 'Company Placed', 'target','department'], axis = 1)
+    y = train_data['target']
+    from sklearn.model_selection import train_test_split
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=0)
+    num_classes = 10
+    y_train_processed = np.clip(y_train, 0, num_classes - 1)
+    y_test_processed = np.clip(y_test, 0, num_classes - 1)
+    from sklearn.preprocessing import MinMaxScaler
+    from keras.layers import Conv1D, Dense, Flatten, MaxPooling1D, Dropout, BatchNormalization
+    from keras.models import Sequential
+    scaler = MinMaxScaler()
+    X_train_scaled = scaler.fit_transform(x_train)
+    X_test_scaled = scaler.transform(x_test)
+    X_train_reshaped = X_train_scaled.reshape((X_train_scaled.shape[0], X_train_scaled.shape[1], 1))
+    X_test_reshaped = X_test_scaled.reshape((X_test_scaled.shape[0], X_test_scaled.shape[1], 1))
+
+    cnn_model = Sequential()
+    cnn_model.add(Conv1D(filters=64, kernel_size=5, activation='relu', input_shape=(X_train_reshaped.shape[1], X_train_reshaped.shape[2]), padding='same'))
+    cnn_model.add(BatchNormalization())
+    cnn_model.add(MaxPooling1D(pool_size=2))
+    cnn_model.add(Dropout(0.5))
+
+    cnn_model.add(Conv1D(filters=128, kernel_size=5, activation='relu', padding='same'))
+    cnn_model.add(BatchNormalization())
+    cnn_model.add(MaxPooling1D(pool_size=2))
+    cnn_model.add(Dropout(0.5))
+
+    cnn_model.add(Flatten())
+    cnn_model.add(Dense(256, activation='relu'))
+    cnn_model.add(Dropout(0.5))
+
+    # Use 'softmax' for multi-class classification
+    cnn_model.add(Dense(num_classes, activation='softmax'))
+
+    cnn_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    history_cnn = cnn_model.fit(X_train_reshaped, y_train_processed, epochs=5, batch_size=64, validation_data=(X_test_reshaped, y_test_processed),verbose=0)
+    return cnn_model
+
+
+
+@app.route('/form', methods=["GET", "POST"])
+def form():
+    full_name = request.form['full_name']
+    projects_done = request.form['projects_done']
+    certifications_internships = request.form['certifications_internships']
+    twelfth_mark = float(request.form['twelfth_mark'])
+    #print(twelfth_mark)
+    tenth_mark =float (request.form['tenth_mark'])
+    #print(tenth_mark)
+    current_cgpa = float(request.form['current_cgpa'])
+    #print(current_cgpa)
+    backlogs = int(request.form['backlogs'])
+    skills = request.form['skills']
+    department = request.form['department']
+    if  twelfth_mark<35:
+        return "you are not elgible because your twelfth mark is below 35 "
+    elif  tenth_mark<35:
+        return "you are not elgible because your tenth mark is below 35 "
+    elif  current_cgpa<3.5:
+        return "you are not elgible because your tenth mark is below 3.5 "
+
+    else:
+        cnn_model =  model()
+        predicted_probs = cnn_model.predict([[twelfth_mark,tenth_mark,current_cgpa,backlogs,0,0]])
+        #print(predicted_probs)
+        top_indices = np.argsort(predicted_probs[0])[::-1][:3]
+        top_companies = [(class_names[i]) for i in top_indices]
+        #print(top_companies)
+        suggested_roles_text = suggest_roles(skills.lower())
+        #print(suggested_roles_text)
+        return render_template('result.html',company=top_companies,roles=suggested_roles_text)
+
+@app.route('/feedback', methods=["GET", "POST"])
+def feedback():
+    if request.method == "POST":
+        feedback = request.form['feedback']
+        user_email=u[-1]
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO feedback (user_email, feedback) VALUES (?, ?)", (user_email, feedback))
+        conn.commit()
+        flash('Registration successful!', 'success')
+        return render_template('register.html')
+
+@app.route('/user_details', methods=["GET", "POST"])
+def user_details():
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM register ")
+        user = cursor.fetchall()
+        return render_template("userdetails.html",user=user)
+    
+
+@app.route('/feedback_details', methods=["GET", "POST"])
+def feedback_details():
+        conn = sqlite3.connect(database)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM feedback ")
+        user = cursor.fetchall()
+        return render_template("feedback_details.html",user=user)
+    
+
+
+if __name__ == '__main__':
+    app.run(debug=False, port=600)
